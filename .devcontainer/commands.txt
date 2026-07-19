@@ -1,0 +1,5 @@
+/opt/venv/bin/west build -b gartennode application --build-dir application/build/application -- -DEXTRA_CONF_FILE=prj.conf
+
+/opt/venv/bin/python bootloader/mcuboot/scripts/imgtool.py sign --header-size 0x200 --align 8 --version 1.2 --slot-size 0x30000 --key bootloader/mcuboot/gartennode.pem --pad application/build/application/zephyr/zephyr.bin application/build/signed_zephyr.bin
+
+/opt/venv/bin/west build -b gartennode boot/zephyr --build-dir /workspace/application/build/bootloader -- -DEXTRA_CONF_FILE=../../bootloader.conf
