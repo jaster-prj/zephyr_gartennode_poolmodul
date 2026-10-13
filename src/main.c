@@ -5,7 +5,7 @@
  */
 
 #include <inttypes.h>
-#include <zephyr/kernel.h>
+ #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/reboot.h>
 #include <zephyr/settings/settings.h>
@@ -31,7 +31,7 @@ static CO_SDO_abortCode_t odf_2108(CO_ODF_arg_t *odf_arg);
 static CO_SDO_abortCode_t odf_2112(CO_ODF_arg_t *odf_arg);
 
 #define STORAGE_PARTITION	storage_partition
-#define STORAGE_PARTITION_ID	FIXED_PARTITION_ID(STORAGE_PARTITION)
+#define STORAGE_PARTITION_ID	PARTITION_ID(STORAGE_PARTITION)
 
 #define CAN_INTERFACE DEVICE_DT_GET(DT_CHOSEN(zephyr_canbus))
 #define CAN_BITRATE (DT_PROP_OR(DT_CHOSEN(zephyr_canbus), bitrate, \
@@ -267,6 +267,8 @@ int main(void)
 			return 0;
 		}
 		LOG_INF("CANopen stack initialized");
+		CO_NMT_setInternalState(CO->NMT, CO_NMT_OPERATIONAL);
+		CO->NMT->HBproducerTimer = 0U;
 
 #ifdef CONFIG_CANOPENNODE_STORAGE
 		canopen_storage_attach(CO->SDO[0], CO->em);

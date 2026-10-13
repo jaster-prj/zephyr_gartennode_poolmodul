@@ -11,4 +11,20 @@ config CANOPEN_NODE_ID
 	help
 	  7-bit CANopen Node ID
 
+config APP_NATIVE_SIM_W1_EMUL
+	bool "Emulate the DS18B20 W1 sensor in native_sim"
+	default n
+	help
+	  Use a software-emulated temperature value when the native simulator does not
+	  expose a real W1 bus or DS18B20 device. This keeps the application runnable
+	  in host-based tests without changing the real hardware board configuration.
+
+config APP_NATIVE_SIM_W1_EMUL_TEMP_C
+	int "Emulated DS18B20 temperature in 0.1 C units"
+	default 250
+	range -500 1250
+	help
+	  Temperature value used by the native_sim W1 emulator. For example, 250 means
+	  25.0 C.
+
 source "Kconfig.zephyr"

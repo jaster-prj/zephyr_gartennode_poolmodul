@@ -1,4 +1,5 @@
 #include "common.h"
+#include <stdio.h>
 
 double averagearray(uint16_t* arr, int number){
   int i;
@@ -6,7 +7,7 @@ double averagearray(uint16_t* arr, int number){
   double avg;
   long amount=0;
   if(number<=0){
-    printf("Error number for the array to avraging!/n");
+    printf("Error number for the array to avraging!\n");
     return 0;
   }
   if(number<5){   //less than 5, calculated directly statistics

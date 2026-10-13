@@ -313,7 +313,7 @@ ObjectType=0x7
 ;StorageLocation=ROM
 DataType=0x0009
 AccessType=const
-DefaultValue=0.0.1
+DefaultValue=0.0.3
 PDOMapping=0
 
 [1010]
@@ -1768,7 +1768,7 @@ ObjectType=0x7
 ;StorageLocation=ROM
 DataType=0x0007
 AccessType=rw
-DefaultValue=0x00000001
+DefaultValue=0x00000008
 PDOMapping=0
 
 [ManufacturerObjects]

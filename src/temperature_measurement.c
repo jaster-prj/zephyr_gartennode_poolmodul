@@ -10,7 +10,16 @@ LOG_MODULE_REGISTER(temperature_measurement, CONFIG_CANOPEN_LOG_LEVEL);
 
 #if defined(CONFIG_SENSOR)
 #include <zephyr/drivers/sensor.h>
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(temp_0), okay)
 static const struct device *temp_sensor_dev = DEVICE_DT_GET(DT_NODELABEL(temp_0));
+#else
+static const struct device *temp_sensor_dev = NULL;
+#endif
+
+#if defined(CONFIG_APP_NATIVE_SIM_W1_EMUL)
+static bool native_sim_temp_emulator_active;
+static float native_sim_temp_emulator_value_c;
+#endif
 #endif
 
 #if defined(CONFIG_SENSOR)
@@ -43,6 +52,15 @@ int temperature_measurement_init(void)
 {
     struct w1_rom w1rom;
     struct sensor_value value;
+
+#if defined(CONFIG_APP_NATIVE_SIM_W1_EMUL)
+    native_sim_temp_emulator_active = true;
+    native_sim_temp_emulator_value_c = (float)CONFIG_APP_NATIVE_SIM_W1_EMUL_TEMP_C / 10.0f;
+    LOG_INF("Using native_sim W1 emulator, emulated temperature %.1f C",
+            (double)native_sim_temp_emulator_value_c);
+    return 0;
+#endif
+
     if (temp_sensor_dev == NULL) {
         LOG_ERR("The temp_sensor device is not defined.");
         return -ENODEV;
@@ -81,6 +99,27 @@ int temperature_measurement_read(void)
 {
     int err;
     struct sensor_value temp_value;
+
+#if defined(CONFIG_APP_NATIVE_SIM_W1_EMUL)
+    if (native_sim_temp_emulator_active) {
+        float temperature = native_sim_temp_emulator_value_c;
+
+        if (temperature < -50.0f) {
+            temperature = -50.0f;
+        } else if (temperature > 125.0f) {
+            temperature = 125.0f;
+        }
+
+        CO_LOCK_OD();
+        OD_temperatureRaw = (int16_t)(temperature * 1000);
+        OD_temperatureMeasurement = temperature;
+        CO_UNLOCK_OD();
+
+        LOG_DBG("Temperature measurement (native_sim emulator): %.2f°C",
+                (double)temperature);
+        return 0;
+    }
+#endif
 
     if (temp_sensor_dev == NULL || !device_is_ready(temp_sensor_dev)) {
         LOG_ERR("Temperature sensor device not ready.");
