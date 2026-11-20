@@ -1,0 +1,57 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "${MQTT_PUBLISHED_PORT:-1883}:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  companion:
+    image: testbed-companion:latest
+    environment:
+      GARDEN_ID: "${GARDEN_ID:-garden-1}"
+      MODULE_ID: "${MODULE_ID:-pool-1}"
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_CLIENT_ID: "${MQTT_CLIENT_ID:-pool-module-test}"
+      SIMULATOR_HOST: 127.0.0.1
+      SIMULATOR_IPC_PORT: "46003"
+      COMPANION_IPC_PORT: "46004"
+    depends_on:
+      - mosquitto
+
+  simulator:
+    image: pool-native-sim-testbed:local
+    network_mode: "service:companion"
+    depends_on:
+      - companion
+
+  can-observer:
+    image: pool-native-sim-testbed:local
+    network_mode: "service:companion"
+    depends_on:
+      - simulator
+    entrypoint: ["/opt/venv/bin/python"]
+    command:
+      - "/workspace/application/testbed/canopen/can_observer.py"
+
+  test-runner:
+    image: pool-native-sim-testbed:local
+    network_mode: "service:companion"
+    depends_on:
+      - simulator
+      - can-observer
+      - mosquitto
+    environment:
+      RUN_CAN_INTEGRATION: "1"
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+    profiles: ["test"]
+    entrypoint: ["/opt/venv/bin/python"]
+    command:
+      - "-m"
+      - "unittest"
+      - "discover"
+      - "-s"
+      - "/workspace/application/testbed/canopen"
+      - "-v"

@@ -1,0 +1,47 @@
+diff --git a/Kconfig b/Kconfig
+index 7806220..70d60a3 100644
+--- a/Kconfig
++++ b/Kconfig
+@@ -2,6 +2,6 @@
+ 
+ menu "External native-linux-udp-can module"
+ 
+-source "drivers/can/Kconfig.native_udp"
++rsource "drivers/can/Kconfig.native_udp"
+ 
+ endmenu
+diff --git a/drivers/can/can_native_udp.c b/drivers/can/can_native_udp.c
+index 4fc4335..f7c2259 100644
+--- a/drivers/can/can_native_udp.c
++++ b/drivers/can/can_native_udp.c
+@@ -405,7 +405,6 @@ static int can_native_udp_init(const struct device *dev)
+ 	struct sockaddr_in bind_addr = {0};
+ 	int ret;
+ 
+-	sys_slist_init(&data->common.state_change_callbacks);
+ 	k_mutex_init(&data->filter_mutex);
+ 	k_sem_init(&data->tx_idle, 1, 1);
+ 
+diff --git a/drivers/can/can_native_udp.c b/drivers/can/can_native_udp.c
+index 4fc4335..f7c2259 100644
+--- a/drivers/can/can_native_udp.c
++++ b/drivers/can/can_native_udp.c
+@@ -31,7 +31,7 @@ struct can_udp_frame {
+ 	uint32_t id;
+ 	uint8_t dlc;
+ 	uint8_t flags;
+ 	uint8_t reserved[2];
+-	uint8_t data[CANFD_MAX_DLC];
++	uint8_t data[64];
+ };
+
+diff --git a/zephyr/module.yml b/zephyr/module.yml
+index 767ae55..3ea890c 100644
+--- a/zephyr/module.yml
++++ b/zephyr/module.yml
+@@ -3,3 +3,5 @@ name: native-linux-udp-can
+ build:
+   cmake: ./
+   kconfig: ./Kconfig
++  settings:
++    dts_root: .

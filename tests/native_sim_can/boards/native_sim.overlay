@@ -1,0 +1,13 @@
+/ {
+    chosen {
+        zephyr,canbus = &can_udp0;
+    };
+
+    can_udp0: udp-can {
+        compatible = "zephyr,native-linux-udp-can";
+        host = "127.0.0.1";
+        port = <46100>;
+        local-port = <46110>;
+        status = "okay";
+    };
+};

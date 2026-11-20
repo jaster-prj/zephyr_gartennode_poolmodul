@@ -1,0 +1,6 @@
+mainmenu "Native simulator UDP-CAN test"
+config TEST_CAN_NODE_ID
+    int "Test CAN node identifier"
+    range 1 127
+    default 9
+source "Kconfig.zephyr"

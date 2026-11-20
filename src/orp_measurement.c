@@ -99,7 +99,13 @@ int orp_measurement_read()
         return -ENOMEM;
     }
 
+    struct adc_sequence_options sequence_options = {
+        .interval_us = 0,
+        .extra_samplings = (uint16_t)(orp_sample_count - 1U),
+    };
+
     struct adc_sequence sequence = {
+        .options = &sequence_options,
         .channels = BIT(orp_sensor.channel_id),
         .buffer = orp_sample_buffer,
         .buffer_size = orp_sample_count * sizeof(uint16_t),
@@ -117,7 +123,16 @@ int orp_measurement_read()
 
     uint32_t raw = averagearray(orp_sample_buffer, orp_sample_count);
     k_mutex_unlock(&orp_mutex);
-    float orp = ((30*(double)ORP_MEASUREMENT_MV_REF)-(75*raw*ORP_MEASUREMENT_MV_REF/1024))/75-OD_ORPOffset;
+
+    int32_t voltage_mv = (int32_t)raw;
+    err = adc_raw_to_millivolts_dt(&orp_sensor, &voltage_mv);
+    if (err != 0) {
+        LOG_ERR("ORP ADC conversion to millivolts failed: %d", err);
+        return err;
+    }
+
+    /* The ORP amplifier is centered at 1.32 V and inverts the probe signal. */
+    float orp = 1320.0f - (float)voltage_mv - (float)OD_ORPOffset;
 
     if (orp < -1000.0f) {
         orp = -1000.0f;

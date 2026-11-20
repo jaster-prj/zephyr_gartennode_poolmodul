@@ -27,4 +27,39 @@ config APP_NATIVE_SIM_W1_EMUL_TEMP_C
 	  Temperature value used by the native_sim W1 emulator. For example, 250 means
 	  25.0 C.
 
+
+config APP_NATIVE_SIM_PH_GAIN_MV_PER_PH
+	int "Native-sim pH sensor gain (mV per pH)"
+	default 150
+	range 1 1000
+	help
+	  Test-only pH sensor transfer gain. This is independent of CANopen calibration.
+
+config APP_NATIVE_SIM_PH_OFFSET_MV
+	int "Native-sim pH sensor offset (mV)"
+	default 600
+	range 0 3300
+
+config APP_NATIVE_SIM_ORP_GAIN_PER_MV
+	int "Native-sim ORP sensor gain in milli-units"
+	default 1000
+	range 1 10000
+	help
+	  1000 represents unity voltage gain (1 mV at input produces 1 mV at ADC).
+
+config APP_NATIVE_SIM_ORP_OFFSET_MV
+	int "Native-sim ORP sensor offset (mV)"
+	default 1650
+	range 0 3300
+
+config APP_NATIVE_SIM_IPC_PORT
+	int "Native-sim sensor IPC UDP port"
+	default 46003
+	range 1024 65535
+
+config APP_NATIVE_SIM_COMPANION_IPC_PORT
+	int "Native-sim companion IPC UDP port"
+	default 46004
+	range 1024 65535
+
 source "Kconfig.zephyr"

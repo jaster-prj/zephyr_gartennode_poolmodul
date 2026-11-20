@@ -14,10 +14,21 @@
 #include <zephyr/storage/flash_map.h>
 #include <zephyr/sys/printk.h>
 #include <canopennode.h>
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+K_SEM_DEFINE(can_rx_wakeup, 0, 1);
+static void native_sim_can_rx_wakeup(void)
+{
+	k_sem_give(&can_rx_wakeup);
+}
+#endif
 #include "watchdog.h"
 #include "sensor.h"
 #include "orp_measurement.h"
 #include "ph_measurement.h"
+#include "temperature_measurement.h"
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+#include "native_sim_sensor.h"
+#endif
 #include "waterpump.h"
 #include "led.h"
 
@@ -68,6 +79,11 @@ static void initialize()
 	if (sensor_init() != 0) {
 		LOG_ERR("Sensor initialization failed");
 	}
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+	if (native_sim_sensor_init() != 0) {
+		LOG_ERR("Native-sim sensor model initialization failed");
+	}
+#endif
 	if (waterpump_init() != 0) {
 		LOG_ERR("Waterpump initialization failed");
 	}
@@ -292,6 +308,9 @@ int main(void)
 
 		sensor_enable(OD_sensorEnable);
 
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+		canopen_set_rxmsg_callback(native_sim_can_rx_wakeup);
+#endif
 		CO_CANsetNormalMode(CO->CANmodule[0]);
 		struct sCO_OD_EEPROM eeprom_old = CO_OD_EEPROM;
 
@@ -299,6 +318,17 @@ int main(void)
 			timeout = 1U; /* default timeout in milliseconds */
 			timestamp = k_uptime_get();
 			reset = CO_process(CO, (uint16_t)elapsed, &timeout);
+
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+			int sensor_updates = native_sim_sensor_process();
+			if (sensor_updates > 0 && OD_sensorEnable != 0U) {
+				/* Apply emulated input immediately; the sensor thread continues periodic sampling. */
+				(void)ph_measurement_read();
+				(void)orp_measurement_read();
+				(void)temperature_measurement_read();
+				sensor_wakeup();
+			}
+#endif
 
 			if (reset != CO_RESET_NOT) {
 				break;
@@ -331,7 +361,11 @@ int main(void)
 				 * stack requested and calculate the
 				 * exact time elapsed.
 				 */
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+				(void)k_sem_take(&can_rx_wakeup, K_MSEC(timeout));
+#else
 				k_sleep(K_MSEC(timeout));
+#endif
 				elapsed = (uint32_t)k_uptime_delta(&timestamp);
 			} else {
 				/*

@@ -1,0 +1,21 @@
+mainmenu "Native-sim ADC emulator test"
+config APP_NATIVE_SIM_PH_GAIN_MV_PER_PH
+ int "pH gain"
+ default 150
+config APP_NATIVE_SIM_PH_OFFSET_MV
+ int "pH offset"
+ default 600
+config APP_NATIVE_SIM_ORP_GAIN_PER_MV
+ int "ORP gain in milli-units"
+ default 1000
+config APP_NATIVE_SIM_ORP_OFFSET_MV
+ int "ORP offset"
+ default 1650
+config APP_NATIVE_SIM_IPC_PORT
+ int "IPC port"
+ default 46003
+source "Kconfig.zephyr"
+
+config APP_NATIVE_SIM_COMPANION_IPC_PORT
+ int "Companion IPC port"
+ default 46004

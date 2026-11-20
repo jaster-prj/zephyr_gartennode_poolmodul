@@ -14,5 +14,8 @@ void sensor_func(void *d0, void *d1, void *d2);
 int sensor_enable(bool value);
 bool sensor_enabled(void);
 int sensor_process(void);
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+void sensor_wakeup(void);
+#endif
 
 #endif /* _SENSOR_H */

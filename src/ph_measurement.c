@@ -75,7 +75,13 @@ int ph_measurement_read(void)
         return -ENOMEM;
     }
 
+    struct adc_sequence_options sequence_options = {
+        .interval_us = 0,
+        .extra_samplings = (uint16_t)(ph_sample_count - 1U),
+    };
+
     struct adc_sequence sequence = {
+        .options = &sequence_options,
         .channels = BIT(ph_sensor.channel_id),
         .buffer = ph_sample_buffer,
         .buffer_size = ph_sample_count * sizeof(uint16_t),

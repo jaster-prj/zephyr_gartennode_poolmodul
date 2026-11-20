@@ -3,6 +3,9 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include "canopennode.h"
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+#include "native_sim_sensor.h"
+#endif
 
 LOG_MODULE_REGISTER(waterpump, CONFIG_CANOPEN_LOG_LEVEL);
 
@@ -46,6 +49,10 @@ int waterpump_on(void)
 
 	waterpump_state = true;
 	LOG_DBG("Waterpump turned on");
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+	(void)native_sim_sensor_publish_state("/state/actor/waterpump",
+		(const uint8_t *)"ON", 2);
+#endif
 	return 0;
 }
 
@@ -66,6 +73,10 @@ int waterpump_off(void)
 
 	waterpump_state = false;
 	LOG_DBG("Waterpump turned off");
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+	(void)native_sim_sensor_publish_state("/state/actor/waterpump",
+		(const uint8_t *)"OFF", 3);
+#endif
 	return 0;
 }
 
