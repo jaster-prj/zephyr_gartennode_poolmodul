@@ -57,8 +57,6 @@
 	/* pinctrl-0 = <&adc1_in5_pa0 &adc1_in6_pa1 &adc1_in7_pa2 &adc1_in8_pa3 &adc1_in9_pa4 &adc1_in10_pa5 &adc1_in11_pa6 &adc1_in12_pa7>; */
 	pinctrl-0 = <&adc1_in7_pa2 &adc1_in8_pa3>;
 	pinctrl-names = "default";
-	st,adc-clock-source = "SYNC";
-	st,adc-prescaler = <4>;
 	status = "okay";
 
 	channel@7 {
@@ -76,4 +74,9 @@
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
 		zephyr,resolution = <12>;
 	};
+};
+
+&adc123_common {
+	st,adc-clock-source = "SYNC";
+	st,adc-prescaler = <4>;
 };
