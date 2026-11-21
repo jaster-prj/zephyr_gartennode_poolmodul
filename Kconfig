@@ -11,6 +11,13 @@ config CANOPEN_NODE_ID
 	help
 	  7-bit CANopen Node ID
 
+config CANOPEN_LOG_LEVEL
+	int "CANopen application log level"
+	default 4
+	range 0 4
+	help
+	  Log level used by application modules that handle CANopen data.
+
 config APP_NATIVE_SIM_W1_EMUL
 	bool "Emulate the DS18B20 W1 sensor in native_sim"
 	default n
