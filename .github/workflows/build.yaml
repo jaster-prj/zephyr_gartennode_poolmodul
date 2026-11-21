@@ -25,8 +25,8 @@ jobs:
         working-directory: ./zephyr_workspace
         run: |
           west update
-          west zephyr-export
           /opt/venv/bin/python -m pip install -r zephyr/scripts/requirements.txt
+          west zephyr-export
       - name: Clone Application
         uses: actions/checkout@v7
         with:

@@ -8,7 +8,12 @@ WORKDIR /workspace
 COPY patches/zephyr-native-linux-udp-can-compat.patch /tmp/udp-can-compat.patch
 RUN test "$(git -C /workspace/zephyr-native-linux-udp-can rev-parse HEAD)" = \
       "6f46710cc3cf3c2a341256b36c4b3c19f3627be7" \
-    && git -C /workspace/zephyr-native-linux-udp-can apply /tmp/udp-can-compat.patch
+    && sed -i \
+      's|^source "drivers/can/Kconfig.native_udp"$|rsource "drivers/can/Kconfig.native_udp"|' \
+      /workspace/zephyr-native-linux-udp-can/Kconfig \
+    && sed '/^diff --git a\/Kconfig /,/^ endmenu$/d' /tmp/udp-can-compat.patch \
+      > /tmp/udp-can-driver-compat.patch \
+    && git -C /workspace/zephyr-native-linux-udp-can apply /tmp/udp-can-driver-compat.patch
 
 COPY . /workspace/application
 RUN /opt/venv/bin/pip install --no-cache-dir paho-mqtt==2.1.0
