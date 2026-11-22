@@ -4,7 +4,22 @@
 
 Use the persistent `ghcr.io/jaster-prj/devcontainer-zephyr:latest` development container. Its `/workspace` contains the Zephyr workspace; do not mount a second workspace over it. The pool application is mounted at `/workspace/application`.
 
-The native-sim build uses Zephyr 4.4.2, the bundled CANopenNodeZephyr and board modules, and the `zephyr-native-linux-udp-can` module at `/workspace/zephyr-native-linux-udp-can`. Apply `patches/zephyr-native-linux-udp-can-compat.patch` to that module before building. The patch adapts its module-relative Kconfig include and devicetree root and removes initialization of a state-callback list absent in the image's CAN API.
+The current native-sim build uses Zephyr 4.5, the bundled CANopenNodeZephyr and
+board modules, and `zephyr-native-linux-udp-can` at
+`/workspace/zephyr-native-linux-udp-can`. The UDP-CAN module owns its wire
+format, idle-bus RX scheduling, and devicetree binding discovery; no firmware
+repository patches the dependency at build time.
+
+CANopen startup/host-clock handling and initial/retried pump actor feedback
+are implemented directly in `src/main.c` and `src/waterpump.c`, guarded for
+native-sim. No image build rewrites these application sources. Hardware startup
+and GPIO control remain on their existing non-native paths.
+
+`src/native_sim_ds18b20.c` is simulator-only and is added to the application
+only for `CONFIG_BOARD_NATIVE_SIM`; CMake excludes it from hardware builds. Its
+non-simulator stubs remain self-contained for configurations that compile the
+file directly, with the required errno and Zephyr utility headers available
+outside the simulator guard.
 
 From `/workspace`, the verified build command is:
 
@@ -16,6 +31,21 @@ From `/workspace`, the verified build command is:
 ```
 
 The application-specific native-sim configuration is `boards/native_sim.conf`.
+
+For the Virtual Garden UDP-CAN endpoint (local port 46110) and the standalone
+startup/actor regression, add
+`-DEXTRA_DTC_OVERLAY_FILE=/workspace/application/testbed/canopen/pool_can.overlay`
+to that build command, then run:
+
+```sh
+python3 application/tests/native_sim_pool/run_startup_actor.py \
+  application/build/native_sim/zephyr/zephyr.exe
+```
+
+The test uses its own UDP gateway and companion sockets and verifies boot-up
+ordering, heartbeat progression without incoming CAN traffic, initial OFF
+feedback after the input handshake, and sampling-pump ON/OFF reports following
+SDO commands. It does not connect to MQTT or physical hardware.
 
 ## Local simulator/companion IPC
 
@@ -77,7 +107,7 @@ The simulator listens on `CONFIG_APP_NATIVE_SIM_IPC_PORT` (default UDP 46003) an
 
 The transport-only companion is in `testbed/companion`. Set `GARDEN_ID` and `MODULE_ID` to construct topics under `garden/{garden_id}/modules/{module_id}`. Input topics are `input/ph` and `input/orp`; measurement state topics are `state/measurement/ph` and `state/measurement/orp`; actor state events use `state/actor/{actor}`. The companion subscribes to both input topics at QoS 1 and forwards the MQTT payload bytes unchanged in the version-1 `GNS1` local UDP frame. It does not parse units or sensor values. The simulator interprets those inputs and owns transfer modeling and CANopen calibration.
 
-Configure the broker and sockets with `MQTT_HOST` (default `mosquitto`), `MQTT_PORT` (1883), `MQTT_CLIENT_ID`, `SIMULATOR_HOST` (127.0.0.1), `SIMULATOR_IPC_PORT` (46003), and `COMPANION_IPC_PORT` (46004). `paho-mqtt` reconnects automatically; a clean session re-subscribes after reconnect, so the broker replays any retained sensor inputs as the current environment. Firmware measurement and actor events are published at QoS 1 without retain, preventing stale telemetry from being replayed as current state. Sensor input retention is owned by the publisher/broker, not the companion.
+Configure the broker and sockets with `MQTT_HOST` (default `mosquitto`), `MQTT_PORT` (1883), `MQTT_CLIENT_ID`, `SIMULATOR_HOST` (127.0.0.1), `SIMULATOR_IPC_PORT` (46003), and `COMPANION_IPC_PORT` (46004). `paho-mqtt` reconnects automatically; a clean session re-subscribes after reconnect, so the broker replays retained sensor inputs. Firmware measurements are published at QoS 1 without retain. Actor events are retained as last-known physical output state; they are not proof of current connectivity. The firmware retries its initial pump state until a valid input establishes the module topic root.
 
 Run companion protocol and relay unit tests with:
 
@@ -110,11 +140,16 @@ The ORP measurement converts ADC codes to millivolts using the configured ADC re
 Build the runnable simulator image from the repository root (no Zephyr workspace bind mount is used; the base image supplies the verified bundled workspace):
 
 ```sh
-docker build -f testbed/Dockerfile -t pool-native-sim-testbed:local .
+docker build -f testbed/Dockerfile \
+  --build-context native-udp-src=../zephyr-native-linux-udp-can \
+  -t pool-native-sim-testbed:local .
 docker build -f testbed/companion/Dockerfile -t testbed-companion:latest .
 ```
 
-The UDP-CAN compatibility patch is applied to the base image's pinned `zephyr-native-linux-udp-can` checkout before the firmware is built. Start broker, companion, simulator, and CAN observer with the locally built images:
+The dependency fixes are part of `zephyr-native-linux-udp-can` itself. The
+firmware is built unchanged from this repository. Virtual Garden uses this same
+`testbed/Dockerfile`; it does not patch the UDP-CAN source.
+Start broker, companion, simulator, and CAN observer with the locally built images:
 
 ```sh
 docker compose -f testbed/compose.yaml --profile test up -d --no-build --pull never

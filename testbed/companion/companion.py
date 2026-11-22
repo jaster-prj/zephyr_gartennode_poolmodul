@@ -2,6 +2,7 @@
 
 import logging
 import socket
+import time
 from typing import Any
 
 from ipc import decode_frame, encode_frame
@@ -26,9 +27,13 @@ class MqttSocketCompanion:
         self.ipc_socket = ipc_socket
         self.simulator_address = simulator_address
         self.topics = topics
-        self.input_topics = {topics.ph_input, topics.orp_input}
+        self.input_topics = {
+            topics.ph_input, topics.orp_input, topics.temperature_environment,
+            topics.temperature_rom_id,
+        }
         self.state_topics = {topics.ph_state, topics.orp_state}
         self.connected = False
+        self.temperature_rom_payload: bytes | None = None
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
@@ -41,8 +46,13 @@ class MqttSocketCompanion:
         self.connected = True
         # A clean session and a new subscription cause the broker to replay
         # retained input values after startup or a connection loss.
-        client.subscribe([(self.topics.ph_input, 1), (self.topics.orp_input, 1)])
-        LOG.info("Subscribed to module pH and ORP inputs")
+        client.subscribe([
+            (self.topics.ph_input, 1),
+            (self.topics.orp_input, 1),
+            (self.topics.temperature_environment, 1),
+            (self.topics.temperature_rom_id, 1),
+        ])
+        LOG.info("Subscribed to module pH/ORP and environment temperature inputs")
 
     def _on_disconnect(
         self, client: Any, userdata: Any, disconnect_flags: Any, reason_code: Any, properties: Any = None
@@ -56,6 +66,10 @@ class MqttSocketCompanion:
         del client, userdata
         if message.topic not in self.input_topics:
             return
+        if message.topic == self.topics.temperature_rom_id:
+            # Keep the retained virtual sensor identity available for a module
+            # process restart; the companion itself normally stays running.
+            self.temperature_rom_payload = bytes(message.payload)
         try:
             datagram = encode_frame(message.topic, bytes(message.payload))
             self.ipc_socket.sendto(datagram, self.simulator_address)
@@ -64,7 +78,25 @@ class MqttSocketCompanion:
 
     def serve(self, stop: Any) -> None:
         """Publish simulator state events until the supplied stop event is set."""
+        next_rom_replay = 0.0
         while not stop.is_set():
+            now = time.monotonic()
+            if (
+                self.connected
+                and self.temperature_rom_payload is not None
+                and now >= next_rom_replay
+            ):
+                try:
+                    self.ipc_socket.sendto(
+                        encode_frame(
+                            self.topics.temperature_rom_id,
+                            self.temperature_rom_payload,
+                        ),
+                        self.simulator_address,
+                    )
+                except OSError:
+                    LOG.exception("Could not replay the virtual DS18B20 ROM ID")
+                next_rom_replay = now + 1.0
             try:
                 datagram, _ = self.ipc_socket.recvfrom(65536)
             except socket.timeout:

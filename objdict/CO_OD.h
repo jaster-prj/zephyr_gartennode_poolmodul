@@ -528,7 +528,7 @@
 /*******************************************************************************
    STRUCTURES FOR VARIABLES IN DIFFERENT MEMORY LOCATIONS
 *******************************************************************************/
-#define  CO_OD_FIRST_LAST_WORD     0x55 //Any value from 0x01 to 0xFE. If changed, EEPROM will be reinitialized.
+#define  CO_OD_FIRST_LAST_WORD     0x56 //Any value from 0x01 to 0xFE. If changed, EEPROM will be reinitialized.
 
 /***** Structure for ROM variables ********************************************/
 struct sCO_OD_ROM{
@@ -581,7 +581,6 @@ struct sCO_OD_RAM{
 /*2113      */ INTEGER16       ORPMeasurement;
 /*2114      */ INTEGER16       ORPMeasurementComp;
 /*2115      */ INTEGER16       temperatureRaw;
-/*2116      */ UNSIGNED64      temperatureDS18B20ID;
 /*2117      */ REAL32          temperatureMeasurement;
 /*2118      */ BOOLEAN         peristalticPumpEnable[2];
 
@@ -599,6 +598,7 @@ struct sCO_OD_EEPROM{
 /*2108      */ UNSIGNED8       PHSamples;
 /*2111      */ UNSIGNED16      ORPOffset;
 /*2112      */ UNSIGNED8       ORPSamples;
+/*2116      */ UNSIGNED64      temperatureDS18B20ID;
 
                UNSIGNED32     LastWord;
 };
@@ -783,7 +783,7 @@ extern struct sCO_OD_EEPROM CO_OD_EEPROM;
         #define OD_temperatureRaw                                   CO_OD_RAM.temperatureRaw
 
 /*2116, Data Type: UNSIGNED64 */
-        #define OD_temperatureDS18B20ID                             CO_OD_RAM.temperatureDS18B20ID
+        #define OD_temperatureDS18B20ID                             CO_OD_EEPROM.temperatureDS18B20ID
 
 /*2117, Data Type: REAL32 */
         #define OD_temperatureMeasurement                           CO_OD_RAM.temperatureMeasurement

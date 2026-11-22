@@ -14,6 +14,8 @@ def _validate_identifier(value: str, name: str) -> str:
 
 @dataclass(frozen=True)
 class ModuleTopics:
+    temperature_environment: str
+    temperature_rom_id: str
     ph_input: str
     orp_input: str
     ph_state: str
@@ -26,6 +28,8 @@ class ModuleTopics:
         module = _validate_identifier(module_id, "module_id")
         root = f"garden/{garden}/modules/{module}"
         return cls(
+            temperature_environment=f"garden/{garden}/environment/temperature",
+            temperature_rom_id=f"{root}/input/temperature_rom_id",
             ph_input=f"{root}/input/ph",
             orp_input=f"{root}/input/orp",
             ph_state=f"{root}/state/measurement/ph",

@@ -28,7 +28,7 @@ struct sCO_OD_ROM CO_OD_ROM = {
 /*1007*/ 0x0000L,
 /*1008*/ {'J', 'P', ' ', 'G', 'a', 'r', 't', 'e', 'n', 'n', 'o', 'd', 'e', ' ', '[', 'P', 'o', 'o', 'l', 'm', 'o', 'd', 'u', 'l', ']'},
 /*1009*/ {'1', '.', '0'},
-/*100a*/ {'0', '.', '0', '.', '3'},
+/*100a*/ {'0', '.', '1', '.', '0'},
 /*1012*/ 0x0000L,
 /*1014*/ 0x0080L,
 /*1015*/ 0x64,
@@ -82,7 +82,6 @@ struct sCO_OD_RAM CO_OD_RAM = {
 /*2113*/ 0x00,
 /*2114*/ 0x00,
 /*2115*/ 0x00,
-/*2116*/ 0x00000000L,
 /*2117*/ 0,
 /*2118*/ {0, 0},
 
@@ -101,6 +100,7 @@ struct sCO_OD_EEPROM CO_OD_EEPROM = {
 /*2108*/ 0xaL,
 /*2111*/ 0x00,
 /*2112*/ 0xaL,
+/*2116*/ 0x0000000000000000ULL,
 
            CO_OD_FIRST_LAST_WORD,
 };
@@ -350,7 +350,7 @@ const CO_OD_entry_t CO_OD[61] = {
 {0x2113, 0x00, 0xa6, 2, (void*)&CO_OD_RAM.ORPMeasurement},
 {0x2114, 0x00, 0xa6, 2, (void*)&CO_OD_RAM.ORPMeasurementComp},
 {0x2115, 0x00, 0xa6, 2, (void*)&CO_OD_RAM.temperatureRaw},
-{0x2116, 0x00, 0x8e, 8, (void*)&CO_OD_RAM.temperatureDS18B20ID},
+{0x2116, 0x00, 0x8e, 8, (void*)&CO_OD_EEPROM.temperatureDS18B20ID},
 {0x2117, 0x00, 0xa6, 4, (void*)&CO_OD_RAM.temperatureMeasurement},
 {0x2118, 0x02, 0x0e, 1, (void*)&CO_OD_RAM.peristalticPumpEnable[0]},
 };

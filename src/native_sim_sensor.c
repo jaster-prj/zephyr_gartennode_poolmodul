@@ -2,14 +2,20 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/w1.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
+#include <canopennode.h>
 #if defined(CONFIG_BOARD_NATIVE_SIM)
 #include <zephyr/drivers/adc.h>
 #include <zephyr/drivers/adc/adc_emul.h>
+#include "native_sim_ds18b20.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -25,7 +31,11 @@
 #define NATIVE_SIM_IPC_HEADER_SIZE 8
 #define NATIVE_SIM_IPC_TOPIC_SUFFIX_PH "/input/ph"
 #define NATIVE_SIM_IPC_TOPIC_SUFFIX_ORP "/input/orp"
+#define NATIVE_SIM_IPC_TOPIC_SUFFIX_TEMPERATURE "/environment/temperature"
+#define NATIVE_SIM_IPC_TOPIC_SUFFIX_TEMPERATURE_ROM "/input/temperature_rom_id"
 #define NATIVE_SIM_IPC_TOPIC_ROOT_MAX 220
+
+LOG_MODULE_REGISTER(native_sim_sensor, LOG_LEVEL_INF);
 
 int native_sim_ph_voltage_mv(double ph, int32_t gain_mv_per_ph, int32_t offset_mv,
 			     uint32_t vref_mv, uint32_t *voltage_mv)
@@ -70,6 +80,7 @@ static const struct adc_dt_spec orp_adc = ADC_DT_SPEC_GET_BY_NAME(DT_PATH(zephyr
 static int ipc_fd = -1;
 static volatile uint32_t ipc_packet_count;
 static char topic_root[NATIVE_SIM_IPC_TOPIC_ROOT_MAX + 1];
+static bool temperature_rom_received;
 
 static void remember_topic_root(const char *topic, size_t topic_len, size_t suffix_len)
 {
@@ -142,6 +153,44 @@ static bool parse_orp_payload(const char *payload, int32_t *orp_mv)
 	return true;
 }
 
+static bool parse_temperature_payload(const char *payload, double *temperature_c)
+{
+	char *end;
+	double value = strtod(payload, &end);
+
+	if (end == payload || *end != '\0' || !isfinite(value) ||
+	    value < -55.0 || value > 125.0) {
+		return false;
+	}
+	*temperature_c = value;
+	return true;
+}
+
+static bool parse_rom_id_payload(const char *payload, uint64_t *rom_id)
+{
+	char *end;
+	unsigned long long value;
+
+	if (strlen(payload) != 16) {
+		return false;
+	}
+	value = strtoull(payload, &end, 16);
+	if (end == payload || *end != '\0') {
+		return false;
+	}
+	*rom_id = (uint64_t)value;
+	return true;
+}
+
+static bool valid_ds18b20_rom_id(uint64_t rom_id)
+{
+	struct w1_rom rom;
+
+	w1_uint64_to_rom(rom_id, &rom);
+	return rom.family == 0x28 &&
+		rom.crc == w1_crc8((const uint8_t *)&rom, 7);
+}
+
 static void process_ipc_packet(uint8_t *packet, size_t packet_len)
 {
 	uint8_t topic_len;
@@ -180,6 +229,24 @@ static void process_ipc_packet(uint8_t *packet, size_t packet_len)
 		if (parse_orp_payload(payload, &orp) && native_sim_sensor_set_orp(orp) == 0) {
 			remember_topic_root(topic, topic_len, strlen(NATIVE_SIM_IPC_TOPIC_SUFFIX_ORP));
 		}
+	} else if (topic_ends_with(topic, topic_len,
+				   NATIVE_SIM_IPC_TOPIC_SUFFIX_TEMPERATURE)) {
+		double temperature_c;
+
+		if (parse_temperature_payload(payload, &temperature_c)) {
+			native_sim_ds18b20_set_temperature(temperature_c);
+		}
+	} else if (topic_ends_with(topic, topic_len,
+				   NATIVE_SIM_IPC_TOPIC_SUFFIX_TEMPERATURE_ROM)) {
+		uint64_t rom_id;
+
+		if (parse_rom_id_payload(payload, &rom_id) &&
+		    valid_ds18b20_rom_id(rom_id)) {
+			/* The dashboard changes hardware identity, not the firmware's known ID. */
+			if (native_sim_ds18b20_set_rom(rom_id) == 0) {
+				temperature_rom_received = true;
+			}
+		}
 	}
 }
 
@@ -191,11 +258,7 @@ int native_sim_sensor_init(void)
 	if (!adc_is_ready_dt(&ph_adc) || !adc_is_ready_dt(&orp_adc)) {
 		return -ENODEV;
 	}
-	ret = native_sim_sensor_set_ph(7.0);
-	if (ret != 0) {
-		return ret;
-	}
-	ret = native_sim_sensor_set_orp(0);
+	ret = native_sim_ds18b20_init();
 	if (ret != 0) {
 		return ret;
 	}
@@ -212,6 +275,33 @@ int native_sim_sensor_init(void)
 		close(ipc_fd);
 		ipc_fd = -1;
 		return ret;
+	}
+
+	ret = native_sim_sensor_set_ph(7.0);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = native_sim_sensor_set_orp(0);
+	if (ret != 0) {
+		return ret;
+	}
+
+	/*
+	 * The companion replays the Dashboard's retained ROM ID after it connects.
+	 * Give that input time to arrive before the firmware scans the 1-Wire bus;
+	 * this lets startup compare the EEPROM ID with the virtual sensor's current
+	 * identity, as it would after replacing a physical DS18B20.
+	 */
+	for (int attempt = 0; attempt < 250 && !temperature_rom_received; attempt++) {
+		ret = native_sim_sensor_process();
+		if (ret < 0) {
+			LOG_WRN("Could not process startup sensor inputs: %d", ret);
+			break;
+		}
+		k_sleep(K_MSEC(20));
+	}
+	if (!temperature_rom_received) {
+		LOG_INF("No Dashboard DS18B20 ROM received during startup; using default virtual sensor");
 	}
 
 	return 0;

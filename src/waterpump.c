@@ -13,6 +13,21 @@ static const struct gpio_dt_spec waterpump_sw =
 	GPIO_DT_SPEC_GET_OR(DT_NODELABEL(waterpump_sw), gpios, {0});
 static bool waterpump_state = false;
 
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+static bool waterpump_state_reported;
+
+static void publish_waterpump_state(void)
+{
+	const char *payload = waterpump_state ? "ON" : "OFF";
+	size_t payload_len = waterpump_state ? 2U : 3U;
+
+	if (native_sim_sensor_publish_state("/state/actor/waterpump",
+					   (const uint8_t *)payload, payload_len) == 0) {
+		waterpump_state_reported = true;
+	}
+}
+#endif
+
 int waterpump_init(void)
 {
 	int err;
@@ -29,6 +44,9 @@ int waterpump_init(void)
 	}
 
 	waterpump_state = false;
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+	waterpump_state_reported = false;
+#endif
 	return 0;
 }
 
@@ -50,8 +68,8 @@ int waterpump_on(void)
 	waterpump_state = true;
 	LOG_DBG("Waterpump turned on");
 #if defined(CONFIG_BOARD_NATIVE_SIM)
-	(void)native_sim_sensor_publish_state("/state/actor/waterpump",
-		(const uint8_t *)"ON", 2);
+	waterpump_state_reported = false;
+	publish_waterpump_state();
 #endif
 	return 0;
 }
@@ -74,8 +92,8 @@ int waterpump_off(void)
 	waterpump_state = false;
 	LOG_DBG("Waterpump turned off");
 #if defined(CONFIG_BOARD_NATIVE_SIM)
-	(void)native_sim_sensor_publish_state("/state/actor/waterpump",
-		(const uint8_t *)"OFF", 3);
+	waterpump_state_reported = false;
+	publish_waterpump_state();
 #endif
 	return 0;
 }
@@ -102,5 +120,11 @@ int waterpump_process(void)
 		return waterpump_off();
 	}
 
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+	/* Retry initial feedback until a valid input establishes the MQTT root. */
+	if (!waterpump_state_reported) {
+		publish_waterpump_state();
+	}
+#endif
 	return 0;
 }

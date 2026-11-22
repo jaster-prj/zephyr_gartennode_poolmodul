@@ -4,8 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+#define _POSIX_C_SOURCE 200809L
+#include <time.h>
+#endif
+
 #include <inttypes.h>
- #include <zephyr/kernel.h>
+#include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/reboot.h>
 #include <zephyr/settings/settings.h>
@@ -20,8 +25,18 @@ static void native_sim_can_rx_wakeup(void)
 {
 	k_sem_give(&can_rx_wakeup);
 }
+
+static int64_t native_sim_monotonic_ms(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
 #endif
 #include "watchdog.h"
+#include "update_control.h"
+#include "update_diagnostics.h"
 #include "sensor.h"
 #include "orp_measurement.h"
 #include "ph_measurement.h"
@@ -76,14 +91,15 @@ static void initialize()
 	if (led_init() != 0) {
 		LOG_ERR("LED initialization failed");
 	}
-	if (sensor_init() != 0) {
-		LOG_ERR("Sensor initialization failed");
-	}
 #if defined(CONFIG_BOARD_NATIVE_SIM)
+	/* Bind the virtual sensor IPC before the sensor thread reads its EEPROM ID. */
 	if (native_sim_sensor_init() != 0) {
 		LOG_ERR("Native-sim sensor model initialization failed");
 	}
 #endif
+	if (sensor_init() != 0) {
+		LOG_ERR("Sensor initialization failed");
+	}
 	if (waterpump_init() != 0) {
 		LOG_ERR("Waterpump initialization failed");
 	}
@@ -227,6 +243,10 @@ int main(void)
 	uint16_t timeout;
 	uint32_t elapsed;
 	int64_t timestamp;
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+	int64_t native_sim_last_process;
+	bool native_sim_nmt_started;
+#endif
 	int task_id = -1;
 #ifdef CONFIG_CANOPENNODE_STORAGE
 	int ret;
@@ -275,6 +295,9 @@ int main(void)
 
 	while (reset != CO_RESET_APP) {
 		elapsed =  0U; /* milliseconds */
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+		native_sim_nmt_started = false;
+#endif
 
 		LOG_INF("CANopen stack initialize");
 		err = CO_init(&can, CONFIG_CANOPEN_NODE_ID, CAN_BITRATE);
@@ -283,8 +306,10 @@ int main(void)
 			return 0;
 		}
 		LOG_INF("CANopen stack initialized");
+#if !defined(CONFIG_BOARD_NATIVE_SIM)
 		CO_NMT_setInternalState(CO->NMT, CO_NMT_OPERATIONAL);
 		CO->NMT->HBproducerTimer = 0U;
+#endif
 
 #ifdef CONFIG_CANOPENNODE_STORAGE
 		canopen_storage_attach(CO->SDO[0], CO->em);
@@ -304,6 +329,10 @@ int main(void)
 		if (IS_ENABLED(CONFIG_CANOPENNODE_PROGRAM_DOWNLOAD)) {
 			canopen_program_download_attach(CO->NMT, CO->SDO[0],
 							CO->em);
+			pool_update_control_attach(CO->SDO[0]);
+#if defined(CONFIG_POOL_UPDATE_DIAGNOSTICS)
+			pool_update_diagnostics_attach(CO->SDO[0]);
+#endif
 		}
 
 		sensor_enable(OD_sensorEnable);
@@ -313,13 +342,34 @@ int main(void)
 #endif
 		CO_CANsetNormalMode(CO->CANmodule[0]);
 		struct sCO_OD_EEPROM eeprom_old = CO_OD_EEPROM;
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+		native_sim_last_process = native_sim_monotonic_ms();
+#endif
 
 		while (true) {
 			timeout = 1U; /* default timeout in milliseconds */
 			timestamp = k_uptime_get();
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+			/* UDP and simulator scheduling need not advance kernel uptime. */
+			int64_t now_ms = native_sim_monotonic_ms();
+			uint32_t elapsed_ms = (uint32_t)(now_ms - native_sim_last_process);
+
+			elapsed = elapsed_ms;
+			if (elapsed_ms > 0U) {
+				native_sim_last_process = now_ms;
+			}
+#endif
 			reset = CO_process(CO, (uint16_t)elapsed, &timeout);
 
 #if defined(CONFIG_BOARD_NATIVE_SIM)
+			if (!native_sim_nmt_started) {
+				/* CO_process emits boot-up before the Operational heartbeat. */
+				CO_NMT_setInternalState(CO->NMT, CO_NMT_OPERATIONAL);
+				CO->NMT->HBproducerTimer = OD_producerHeartbeatTime;
+				reset = CO_process(CO, 0U, &timeout);
+				native_sim_nmt_started = true;
+				LOG_INF("Native-sim CANopen node entered OPERATIONAL");
+			}
 			int sensor_updates = native_sim_sensor_process();
 			if (sensor_updates > 0 && OD_sensorEnable != 0U) {
 				/* Apply emulated input immediately; the sensor thread continues periodic sampling. */
@@ -362,7 +412,8 @@ int main(void)
 				 * exact time elapsed.
 				 */
 #if defined(CONFIG_BOARD_NATIVE_SIM)
-				(void)k_sem_take(&can_rx_wakeup, K_MSEC(timeout));
+				/* Bound the wait so sensor IPC and actor feedback keep running. */
+				(void)k_sem_take(&can_rx_wakeup, K_MSEC(MIN(timeout, 1U)));
 #else
 				k_sleep(K_MSEC(timeout));
 #endif
@@ -373,6 +424,9 @@ int main(void)
 				 * done by the stack.
 				 */
 				elapsed = 0U;
+#if defined(CONFIG_BOARD_NATIVE_SIM)
+				k_sleep(K_MSEC(1));
+#endif
 			}
 		}
 

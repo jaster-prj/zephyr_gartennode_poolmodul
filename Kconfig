@@ -18,23 +18,6 @@ config CANOPEN_LOG_LEVEL
 	help
 	  Log level used by application modules that handle CANopen data.
 
-config APP_NATIVE_SIM_W1_EMUL
-	bool "Emulate the DS18B20 W1 sensor in native_sim"
-	default n
-	help
-	  Use a software-emulated temperature value when the native simulator does not
-	  expose a real W1 bus or DS18B20 device. This keeps the application runnable
-	  in host-based tests without changing the real hardware board configuration.
-
-config APP_NATIVE_SIM_W1_EMUL_TEMP_C
-	int "Emulated DS18B20 temperature in 0.1 C units"
-	default 250
-	range -500 1250
-	help
-	  Temperature value used by the native_sim W1 emulator. For example, 250 means
-	  25.0 C.
-
-
 config APP_NATIVE_SIM_PH_GAIN_MV_PER_PH
 	int "Native-sim pH sensor gain (mV per pH)"
 	default 150
@@ -68,5 +51,27 @@ config APP_NATIVE_SIM_COMPANION_IPC_PORT
 	int "Native-sim companion IPC UDP port"
 	default 46004
 	range 1024 65535
+
+config POOL_UPDATE_DIAGNOSTICS
+	bool "Record CANopen update timing and reset causes"
+	depends on CANOPENNODE_PROGRAM_DOWNLOAD && SOC_FAMILY_STM32
+	select HWINFO
+	select LOG_RUNTIME_FILTERING
+	help
+	  Record download progress and callback latency without changing the
+	  flash operation. Suppress sensor log noise to preserve diagnostic
+	  buffer space. Intended for hardware update regression tests.
+
+# Match the installed Gartennode MCUboot, not Zephyr's offset-swap default.
+# Defaults also leave native_sim, which does not use MCUboot, unaffected.
+choice MCUBOOT_BOOTLOADER_MODE
+	default MCUBOOT_BOOTLOADER_MODE_SWAP_SCRATCH if BOARD_GARTENNODE && BOOTLOADER_MCUBOOT
+endchoice
+
+config MCUBOOT_IMGTOOL_SIGN_VERSION
+	default "0.1.0" if BOARD_GARTENNODE && BOOTLOADER_MCUBOOT
+
+config MCUBOOT_EXTRA_IMGTOOL_ARGS
+	default "--pad" if BOARD_GARTENNODE && BOOTLOADER_MCUBOOT
 
 source "Kconfig.zephyr"

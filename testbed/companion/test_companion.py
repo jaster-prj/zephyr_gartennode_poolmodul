@@ -42,7 +42,12 @@ class CompanionTests(unittest.TestCase):
         self.assertEqual(len(self.client.subscriptions), 2)
         self.assertEqual(
             self.client.subscriptions[0],
-            [(self.topics.ph_input, 1), (self.topics.orp_input, 1)],
+            [
+                (self.topics.ph_input, 1),
+                (self.topics.orp_input, 1),
+                (self.topics.temperature_environment, 1),
+                (self.topics.temperature_rom_id, 1),
+            ],
         )
 
     def test_connection_loss_and_reconnect_resubscribe(self):
@@ -61,6 +66,52 @@ class CompanionTests(unittest.TestCase):
         self.assertEqual(frame.topic, self.topics.ph_input)
         self.assertEqual(frame.payload, payload)
         self.assertEqual(self.sock.sent[0][1], ("127.0.0.1", 46003))
+
+    def test_forwards_dashboard_temperature_to_simulator(self):
+        payload = b"-4.75"
+        self.relay._on_message(
+            self.client, None,
+            SimpleNamespace(topic=self.topics.temperature_environment, payload=payload),
+        )
+        frame = decode_frame(self.sock.sent[0][0])
+        self.assertEqual(frame.topic, self.topics.temperature_environment)
+        self.assertEqual(frame.payload, payload)
+
+    def test_forwards_dashboard_rom_id_to_simulator(self):
+        payload = b"2801000000000029"
+        self.relay._on_message(
+            self.client, None,
+            SimpleNamespace(topic=self.topics.temperature_rom_id, payload=payload),
+        )
+        frame = decode_frame(self.sock.sent[0][0])
+        self.assertEqual(frame.topic, self.topics.temperature_rom_id)
+        self.assertEqual(frame.payload, payload)
+
+    def test_replays_dashboard_rom_id_after_module_restart(self):
+        payload = b"2801000000000029"
+        self.relay._on_message(
+            self.client, None,
+            SimpleNamespace(topic=self.topics.temperature_rom_id, payload=payload),
+        )
+        self.sock.sent.clear()
+        self.relay.connected = True
+
+        stop = threading.Event()
+
+        class RestartingSimulatorSocket(FakeSocket):
+            def recvfrom(self, _size):
+                stop.set()
+                raise TimeoutError
+
+        self.relay.ipc_socket = RestartingSimulatorSocket()
+        self.relay.serve(stop)
+
+        frame = decode_frame(self.relay.ipc_socket.sent[0][0])
+        self.assertEqual(frame.topic, self.topics.temperature_rom_id)
+        self.assertEqual(frame.payload, payload)
+        self.assertEqual(
+            self.relay.ipc_socket.sent[0][1], ("127.0.0.1", 46003)
+        )
 
     def test_retained_and_malformed_sensor_payloads_remain_opaque(self):
         for payload in (b"", b"not-a-number", b"\x00\xff"):

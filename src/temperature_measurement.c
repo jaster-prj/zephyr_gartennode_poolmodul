@@ -1,6 +1,7 @@
 #include "temperature_measurement.h"
 
 #include <zephyr/logging/log.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/sensor/w1_sensor.h>
@@ -16,114 +17,157 @@ static const struct device *temp_sensor_dev = DEVICE_DT_GET(DT_NODELABEL(temp_0)
 static const struct device *temp_sensor_dev = NULL;
 #endif
 
-#if defined(CONFIG_APP_NATIVE_SIM_W1_EMUL)
-static bool native_sim_temp_emulator_active;
-static float native_sim_temp_emulator_value_c;
-#endif
+static uint64_t assigned_rom_id;
 #endif
 
 #if defined(CONFIG_SENSOR)
 
-void w1_search_callback(struct w1_rom rom, void *user_data)
+struct temperature_discovery {
+    uint64_t rom_id;
+};
+
+static void w1_search_callback(struct w1_rom rom, void *user_data)
 {
+    struct temperature_discovery *discovery = user_data;
     uint64_t rom_id = w1_rom_to_uint64(&rom);
-    LOG_INF("Device found; family: 0x%02x, serial: 0x%016llx", rom.family, rom_id);
-    if (rom.family == 0x28) { // DS18B20 family code
-        CO_LOCK_OD();
-        OD_temperatureDS18B20ID = rom_id;
-        CO_UNLOCK_OD();
-    } else {
+
+    if (rom.family != 0x28) {
         LOG_WRN("Non-DS18B20 device found on bus, ignoring.");
+        return;
+    }
+    LOG_INF("Found DS18B20: 0x%016llx", (unsigned long long)rom_id);
+    if (discovery->rom_id == 0U) {
+        discovery->rom_id = rom_id;
     }
 }
 
-void temperature_search_sensor(void)
+static int temperature_assign_and_read(uint64_t rom_id,
+                                       struct sensor_value *temperature)
 {
-    const struct device *w1_dev = device_get_binding(DEVICE_DT_NAME(DT_NODELABEL(w1_0)));
-	if (!device_is_ready(w1_dev)) {
-		LOG_ERR("Device not ready");
-		return;
-	}
-	int num_devices = w1_search_rom(w1_dev, w1_search_callback, NULL);
-	LOG_INF("Number of devices found on bus: %d", num_devices);
+    struct w1_rom rom;
+    struct sensor_value address;
+    int ret;
+
+    w1_uint64_to_rom(rom_id, &rom);
+    w1_rom_to_sensor_value(&rom, &address);
+    ret = sensor_attr_set(temp_sensor_dev, SENSOR_CHAN_ALL,
+                          SENSOR_ATTR_W1_ROM, &address);
+    if (ret != 0) {
+        return ret;
+    }
+    assigned_rom_id = rom_id;
+
+    for (int attempt = 0; attempt < 3; attempt++) {
+        ret = sensor_sample_fetch(temp_sensor_dev);
+        if (ret == 0) {
+            ret = sensor_channel_get(temp_sensor_dev,
+                                     SENSOR_CHAN_AMBIENT_TEMP, temperature);
+        }
+        if (ret == 0) {
+            return 0;
+        }
+        if (attempt < 2) {
+            k_sleep(K_MSEC(100));
+        }
+    }
+    return ret;
 }
 
 int temperature_measurement_init(void)
 {
-    struct w1_rom w1rom;
-    struct sensor_value value;
+    struct sensor_value temperature;
+    uint64_t configured_id;
 
-#if defined(CONFIG_APP_NATIVE_SIM_W1_EMUL)
-    native_sim_temp_emulator_active = true;
-    native_sim_temp_emulator_value_c = (float)CONFIG_APP_NATIVE_SIM_W1_EMUL_TEMP_C / 10.0f;
-    LOG_INF("Using native_sim W1 emulator, emulated temperature %.1f C",
-            (double)native_sim_temp_emulator_value_c);
-    return 0;
-#endif
-
-    if (temp_sensor_dev == NULL) {
-        LOG_ERR("The temp_sensor device is not defined.");
-        return -ENODEV;
-    }
-
-    if (!device_is_ready(temp_sensor_dev)) {
+    if (temp_sensor_dev == NULL || !device_is_ready(temp_sensor_dev)) {
         LOG_ERR("The temperature sensor device is not ready.");
         return -ENODEV;
     }
 
-    LOG_INF("Temperature sensor (DS18B20) initialized successfully.");
+    CO_LOCK_OD();
+    configured_id = OD_temperatureDS18B20ID;
+    CO_UNLOCK_OD();
 
-    int i = 0;
-    while (OD_temperatureDS18B20ID == 0 && i < 3) {
-        LOG_INF("Searching for DS18B20 sensor, attempt %d...", i + 1);
-        temperature_search_sensor();
-        if (OD_temperatureDS18B20ID != 0) {
-            break;
+    /* Use the saved ROM directly; only scan if it fails three reads. */
+    if (configured_id != 0U) {
+        if (temperature_assign_and_read(configured_id, &temperature) == 0) {
+            LOG_INF("Using configured DS18B20 0x%016llx",
+                    (unsigned long long)configured_id);
+            CO_LOCK_OD();
+            OD_temperatureRaw = (int16_t)(temperature.val1 * 1000 +
+                                          temperature.val2 / 1000);
+            OD_temperatureMeasurement =
+                (float)temperature.val1 + (float)temperature.val2 / 1000000.0f;
+            CO_UNLOCK_OD();
+            return 0;
         }
-        k_sleep(K_SECONDS(1));
-        i++;
+
+        LOG_WRN("Configured DS18B20 0x%016llx did not respond after 3 reads; clearing ID",
+                (unsigned long long)configured_id);
+        CO_LOCK_OD();
+        OD_temperatureDS18B20ID = 0U;
+        CO_UNLOCK_OD();
     }
 
-    if (OD_temperatureDS18B20ID == 0) {
-        LOG_ERR("No DS18B20 ID stored in OD after search attempts.");
+    const struct device *w1_dev = DEVICE_DT_GET(DT_NODELABEL(w1_0));
+    if (!device_is_ready(w1_dev)) {
+        LOG_ERR("1-Wire bus device is not ready");
         return -ENODEV;
     }
 
-    w1_uint64_to_rom(OD_temperatureDS18B20ID, &w1rom);
-    w1_rom_to_sensor_value(&w1rom, &value);
-    sensor_attr_set(temp_sensor_dev, SENSOR_CHAN_ALL, SENSOR_ATTR_W1_ROM, &value);
-    return 0;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        struct temperature_discovery discovery = {0};
+        int num_devices = w1_search_rom(w1_dev, w1_search_callback, &discovery);
+
+        LOG_INF("DS18B20 discovery attempt %d found %d 1-Wire devices",
+                attempt + 1, num_devices);
+        if (discovery.rom_id != 0U &&
+            temperature_assign_and_read(discovery.rom_id, &temperature) == 0) {
+            CO_LOCK_OD();
+            OD_temperatureDS18B20ID = discovery.rom_id;
+            OD_temperatureRaw = (int16_t)(temperature.val1 * 1000 +
+                                          temperature.val2 / 1000);
+            OD_temperatureMeasurement =
+                (float)temperature.val1 + (float)temperature.val2 / 1000000.0f;
+            CO_UNLOCK_OD();
+            LOG_INF("Stored newly discovered DS18B20 ID 0x%016llx",
+                    (unsigned long long)discovery.rom_id);
+            return 0;
+        }
+        if (attempt < 2) {
+            k_sleep(K_SECONDS(1));
+        }
+    }
+
+    LOG_ERR("No responding DS18B20 sensor found after discovery attempts");
+    return -ENODEV;
 }
 
 int temperature_measurement_read(void)
 {
     int err;
     struct sensor_value temp_value;
-
-#if defined(CONFIG_APP_NATIVE_SIM_W1_EMUL)
-    if (native_sim_temp_emulator_active) {
-        float temperature = native_sim_temp_emulator_value_c;
-
-        if (temperature < -50.0f) {
-            temperature = -50.0f;
-        } else if (temperature > 125.0f) {
-            temperature = 125.0f;
-        }
-
-        CO_LOCK_OD();
-        OD_temperatureRaw = (int16_t)(temperature * 1000);
-        OD_temperatureMeasurement = temperature;
-        CO_UNLOCK_OD();
-
-        LOG_DBG("Temperature measurement (native_sim emulator): %.2f°C",
-                (double)temperature);
-        return 0;
-    }
-#endif
+    uint64_t configured_id;
 
     if (temp_sensor_dev == NULL || !device_is_ready(temp_sensor_dev)) {
         LOG_ERR("Temperature sensor device not ready.");
         return -ENODEV;
+    }
+
+    CO_LOCK_OD();
+    configured_id = OD_temperatureDS18B20ID;
+    CO_UNLOCK_OD();
+    if (configured_id != 0U && configured_id != assigned_rom_id) {
+        struct w1_rom rom;
+        struct sensor_value address;
+
+        w1_uint64_to_rom(configured_id, &rom);
+        w1_rom_to_sensor_value(&rom, &address);
+        err = sensor_attr_set(temp_sensor_dev, SENSOR_CHAN_ALL,
+                              SENSOR_ATTR_W1_ROM, &address);
+        if (err != 0) {
+            return err;
+        }
+        assigned_rom_id = configured_id;
     }
 
     err = sensor_sample_fetch(temp_sensor_dev);
